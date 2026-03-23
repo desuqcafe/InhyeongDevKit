@@ -8,8 +8,9 @@ bl_info = {
     "category": "Development",
 }
 
+import os
 import bpy
-from bpy.props import IntProperty, StringProperty
+from bpy.props import IntProperty, StringProperty, EnumProperty
 
 # Handle reloading when Blender re-imports the package
 if "console" in dir():
@@ -24,6 +25,52 @@ if "console" in dir():
 
 from . import console
 from . import reload
+
+
+# ─────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────
+
+def _is_linked(addon_path):
+    """Check if an addon path is a symlink or Windows junction."""
+    if os.path.islink(addon_path):
+        return True
+    # Check for Windows junction
+    try:
+        import ctypes
+        FILE_ATTRIBUTE_REPARSE_POINT = 0x0400
+        attrs = ctypes.windll.kernel32.GetFileAttributesW(str(addon_path))
+        return attrs != -1 and bool(attrs & FILE_ATTRIBUTE_REPARSE_POINT)
+    except Exception:
+        return False
+
+
+def _get_addon_items(self, context):
+    """Build enum items from enabled addons, excluding DevKit. Shows [linked] status."""
+    items = [("", "— Select Addon —", "Choose an addon to reload")]
+    package = __package__
+    addons_dir = bpy.utils.user_resource("SCRIPTS", path="addons")
+
+    for mod_name in sorted(context.preferences.addons.keys()):
+        if mod_name == package:
+            continue
+
+        addon_path = os.path.join(addons_dir, mod_name)
+        linked = _is_linked(addon_path)
+        label = f"{mod_name}  [linked]" if linked else mod_name
+        desc = f"Reload {mod_name}" + (" (dev linked)" if linked else "")
+        items.append((mod_name, label, desc))
+
+    return items
+
+
+def _get_reload_target(context):
+    """Get the effective reload target from preferences (dropdown or manual)."""
+    addon_prefs = context.preferences.addons.get(__package__)
+    if not addon_prefs:
+        return ""
+    prefs = addon_prefs.preferences
+    return prefs.reload_target or prefs.reload_target_manual or ""
 
 
 # ─────────────────────────────────────────────
@@ -42,9 +89,15 @@ class InhyeongDevKitPreferences(bpy.types.AddonPreferences):
         step=50,
     )
 
-    reload_target: StringProperty(
+    reload_target: EnumProperty(
         name="Reload Target",
-        description="Default addon module name for quick reload (Ctrl+Shift+F10)",
+        description="Addon to reload with Ctrl+Shift+F10",
+        items=_get_addon_items,
+    )
+
+    reload_target_manual: StringProperty(
+        name="Or Type Module Name",
+        description="Manually enter a module name if not in the dropdown",
         default="",
     )
 
@@ -58,10 +111,12 @@ class InhyeongDevKitPreferences(bpy.types.AddonPreferences):
 
         layout.label(text="Hot Reload", icon="FILE_REFRESH")
         layout.prop(self, "reload_target")
-        if self.reload_target:
-            layout.label(text=f"Ctrl+Shift+F10 will reload '{self.reload_target}'", icon="INFO")
+        layout.prop(self, "reload_target_manual")
+        target = self.reload_target or self.reload_target_manual
+        if target:
+            layout.label(text=f"Ctrl+Shift+F10 will reload '{target}'", icon="INFO")
         else:
-            layout.label(text="Set a module name to enable quick reload with Ctrl+Shift+F10", icon="INFO")
+            layout.label(text="Select an addon above to enable quick reload", icon="INFO")
 
         layout.separator()
         layout.label(text="Dev Setup", icon="LINKED")
@@ -76,14 +131,14 @@ def _window_menu_draw(self, context):
     self.layout.separator()
     self.layout.operator("inhyeong_console.open", icon="CONSOLE")
 
-    addon_prefs = context.preferences.addons.get(__package__)
-    if addon_prefs and addon_prefs.preferences.reload_target:
+    target = _get_reload_target(context)
+    if target:
         op = self.layout.operator(
             "inhyeong_devkit.reload_addon",
-            text=f"Reload: {addon_prefs.preferences.reload_target}",
+            text=f"Reload: {target}",
             icon="FILE_REFRESH",
         )
-        op.module_name = addon_prefs.preferences.reload_target
+        op.module_name = target
     else:
         self.layout.operator("inhyeong_devkit.reload_addon", text="Reload Addon...", icon="FILE_REFRESH")
 
