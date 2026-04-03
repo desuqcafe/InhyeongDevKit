@@ -9,7 +9,7 @@ A Blender developer toolkit that bundles essential dev tools into one addon.
 Replaces Blender's clunky system console with an in-app popup.
 
 - **Auto-capture on startup** — intercepts `stdout`/`stderr` the moment the addon is enabled
-- **Popup console** — open from **Window → Inhyeong Console** or **Ctrl+Shift+F9**
+- **Popup console** — open from **Window → Inhyeong DevKit → Inhyeong Console** or **Ctrl+Shift+F9**
 - **Stream filtering** — toggle between All / stdout / stderr output
 - **Text search** — filter log entries in real-time
 - **Per-line selection** — checkbox on each entry, copy selected lines
@@ -38,24 +38,26 @@ Reload addons without restarting Blender or manually uninstalling/reinstalling.
 - **Quick reload** — set a target addon in preferences, then hit **Ctrl+Shift+F10** to reload it instantly
 - **Single addon reload** — disable → purge all submodules from `sys.modules` → re-enable, in one operation
 - **Reload All Scripts** — convenience wrapper for `bpy.ops.script.reload()`
-- **Window menu access** — all reload actions available from Window menu
+- **Window menu access** — all actions grouped under **Window → Inhyeong DevKit** submenu
+- **Unlink Addon Source** — cleanly remove a dev link and disable the addon
 
 #### Dev Setup
 
 1. Install Inhyeong DevKit normally (zip install)
-2. Go to **Window → Link Addon Source...** or find it in addon preferences under "Dev Setup"
-3. Browse to your addon's source folder (the one containing `__init__.py`)
+2. Go to **Window → Inhyeong DevKit → Link Addon Source...** or find it in addon preferences under "Dev Setup"
+3. Browse to your addon's source folder (the one containing `__init__.py`) or a single `.py` file
 4. The operator removes the installed copy and creates a link to your source — your edits are now live
-5. The reload target is auto-set. Hit **Ctrl+Shift+F10** after saving code changes to reload.
+5. The addon is auto-enabled and the reload target is auto-set. Hit **Ctrl+Shift+F10** after saving code changes to reload.
+6. To remove a dev link later, use **Window → Inhyeong DevKit → Unlink Addon Source...**
 
 On Windows this uses directory junctions which don't require admin privileges or Developer Mode. On Mac/Linux it uses standard symlinks.
 
 <details>
 <summary>Manual symlink setup (alternative)</summary>
 
-**Windows (run PowerShell as admin):**
+**Windows (run PowerShell (admin if u want)):**
 ```powershell
-mklink /d "C:\Users\YOU\AppData\Roaming\Blender Foundation\Blender\5.0\scripts\addons\your_addon" "C:\path\to\your\addon\source"
+mklink /J "C:\Users\YOU\AppData\Roaming\Blender Foundation\Blender\5.0\scripts\addons\your_addon" "C:\path\to\your\addon\source"
 ```
 
 **Mac / Linux:**
@@ -87,7 +89,10 @@ In **Edit → Preferences → Add-ons → Inhyeong DevKit**:
 
 - **Console Popup Width** — adjust the console popup width (400–1600px)
 - **Reload Target** — the addon module name to reload with Ctrl+Shift+F10
-- **Link Addon Source** — set up a dev link to your addon source folder
+- **Link Addon Source** — set up a dev link to your addon source folder or single `.py` file
+- **Unlink Addon Source** — remove an existing dev link
+
+These settings are also accessible from **Window → Inhyeong DevKit** submenu.
 
 ## Known Quirks
 
