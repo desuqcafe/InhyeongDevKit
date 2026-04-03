@@ -1,9 +1,22 @@
 import sys
-import importlib
 import bpy
-from bpy.props import StringProperty
+from bpy.props import StringProperty, EnumProperty
 
 ADDON_PACKAGE = __package__.rsplit(".", 1)[0]
+
+
+def _get_enabled_addon_items(context):
+    import os
+    items = [("", "— Select Addon —", "Choose an addon to reload")]
+    addons_dir = bpy.utils.user_resource("SCRIPTS", path="addons")
+    for mod_name in sorted(context.preferences.addons.keys()):
+        if mod_name == ADDON_PACKAGE:
+            continue
+        addon_path = os.path.join(addons_dir, mod_name)
+        linked = os.path.islink(addon_path) or _is_junction(addon_path)
+        label = f"{mod_name}  [linked]" if linked else mod_name
+        items.append((mod_name, label, f"Reload {mod_name}"))
+    return items
 
 
 class INHYEONG_OT_reload_addon(bpy.types.Operator):
@@ -17,8 +30,14 @@ class INHYEONG_OT_reload_addon(bpy.types.Operator):
         default="",
     )
 
+    module_enum: EnumProperty(
+        name="Addon",
+        description="Select an addon to reload",
+        items=lambda self, context: _get_enabled_addon_items(context),
+    )
+
     def execute(self, context):
-        mod_name = self.module_name.strip()
+        mod_name = self.module_name.strip() or self.module_enum
         if not mod_name:
             self.report({"ERROR"}, "No module name specified")
             return {"CANCELLED"}
@@ -32,6 +51,15 @@ class INHYEONG_OT_reload_addon(bpy.types.Operator):
         if mod_name not in context.preferences.addons:
             self.report({"ERROR"}, f"Addon '{mod_name}' is not enabled")
             return {"CANCELLED"}
+
+        import os
+        addons_dir = bpy.utils.user_resource("SCRIPTS", path="addons")
+        addon_path = os.path.join(addons_dir, mod_name)
+        if os.path.exists(addon_path) and not (os.path.islink(addon_path) or _is_junction(addon_path)):
+            self.report({"WARNING"},
+                f"'{mod_name}' is not dev-linked — changes to external sources won't take effect. "
+                f"Use Link Addon Source to set up live development."
+            )
 
         print(f"[devkit] Reloading addon: {mod_name}")
 
@@ -81,6 +109,14 @@ class INHYEONG_OT_reload_addon(bpy.types.Operator):
             return context.window_manager.invoke_props_dialog(self, width=350)
         return self.execute(context)
 
+    def draw(self, context):
+        layout = self.layout
+        layout.prop(self, "module_enum")
+        layout.separator()
+        layout.prop(self, "module_name", text="Or type module name")
+        layout.separator()
+        layout.label(text="Tip: Use Link Addon Source for live dev reload", icon="INFO")
+
 
 class INHYEONG_OT_reload_scripts(bpy.types.Operator):
     bl_idname = "inhyeong_devkit.reload_scripts"
@@ -99,10 +135,10 @@ class INHYEONG_OT_link_source(bpy.types.Operator):
     bl_label = "Link Addon Source"
     bl_description = "Link an addon's source directory into Blender's addons folder for live development"
 
-    source_dir: StringProperty(
-        name="Source Directory",
-        description="Path to your addon source folder (the folder containing __init__.py or the single .py file)",
-        subtype="DIR_PATH",
+    filepath: StringProperty(
+        name="Source Path",
+        description="Path to your addon source folder or single .py file",
+        subtype="FILE_PATH",
         default="",
     )
 
@@ -126,16 +162,21 @@ class INHYEONG_OT_link_source(bpy.types.Operator):
         import platform
         import shutil
 
-        source = os.path.normpath(bpy.path.abspath(self.source_dir))
+        source = os.path.normpath(bpy.path.abspath(self.filepath))
         name = self.addon_name.strip()
 
-        if not source or not os.path.isdir(source):
-            self.report({"ERROR"}, f"Source directory not found: {source}")
+        is_file = os.path.isfile(source) and source.endswith(".py")
+
+        if not source or not (os.path.isdir(source) or is_file):
+            self.report({"ERROR"}, f"Source not found: {source}")
             return {"CANCELLED"}
 
-        # Auto-detect addon name from folder, with safety checks
+        # Auto-detect addon name
         if not name:
-            name = os.path.basename(source.rstrip("/\\"))
+            if is_file:
+                name = os.path.splitext(os.path.basename(source))[0]
+            else:
+                name = os.path.basename(os.path.normpath(source))
 
         # Reject dangerous or invalid names
         if not name or name in (".", "..", "addons", "scripts"):
@@ -154,7 +195,7 @@ class INHYEONG_OT_link_source(bpy.types.Operator):
         if not os.path.isdir(addons_dir):
             os.makedirs(addons_dir, exist_ok=True)
 
-        link_path = os.path.join(addons_dir, name)
+        link_path = os.path.join(addons_dir, name + ".py" if is_file else name)
 
         # Already linked correctly — nothing to do
         if os.path.islink(link_path) or _is_junction(link_path):
@@ -209,13 +250,16 @@ class INHYEONG_OT_link_source(bpy.types.Operator):
         # Create the link
         try:
             if platform.system() == "Windows":
-                import subprocess
-                result = subprocess.run(
-                    ["cmd", "/c", "mklink", "/J", link_path, source],
-                    capture_output=True, text=True
-                )
-                if result.returncode != 0:
-                    raise OSError(result.stderr.strip())
+                if is_file:
+                    os.symlink(source, link_path)
+                else:
+                    import subprocess
+                    result = subprocess.run(
+                        ["cmd", "/c", "mklink", "/J", link_path, source],
+                        capture_output=True, text=True
+                    )
+                    if result.returncode != 0:
+                        raise OSError(result.stderr.strip())
             else:
                 os.symlink(source, link_path)
 
@@ -226,6 +270,13 @@ class INHYEONG_OT_link_source(bpy.types.Operator):
             if addon_prefs:
                 addon_prefs.preferences.reload_target = name
                 print(f"[devkit] Set reload target to '{name}'")
+
+            if name not in context.preferences.addons:
+                try:
+                    bpy.ops.preferences.addon_enable(module=name)
+                    print(f"[devkit] Auto-enabled '{name}'")
+                except Exception as e:
+                    self.report({"WARNING"}, f"Linked but failed to auto-enable: {e}")
 
         except OSError as e:
             self.report({"ERROR"}, f"Failed to create link: {e}")
@@ -241,6 +292,83 @@ class INHYEONG_OT_link_source(bpy.types.Operator):
             layout.label(text="It will be removed and replaced with a link to your source.")
         else:
             layout.prop(self, "addon_name")
+
+
+class INHYEONG_OT_unlink_source(bpy.types.Operator):
+    bl_idname = "inhyeong_devkit.unlink_source"
+    bl_label = "Unlink Addon Source"
+    bl_description = "Remove a dev symlink/junction from Blender's addons folder"
+
+    target: EnumProperty(
+        name="Linked Addon",
+        description="Select a linked addon to unlink",
+        items=lambda self, context: _get_linked_addon_items(context),
+    )
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self, width=350)
+
+    def execute(self, context):
+        import os
+        import platform
+
+        name = self.target
+        if not name:
+            self.report({"ERROR"}, "No addon selected")
+            return {"CANCELLED"}
+
+        addons_dir = bpy.utils.user_resource("SCRIPTS", path="addons")
+        link_path = os.path.join(addons_dir, name)
+
+        if not (os.path.islink(link_path) or _is_junction(link_path)):
+            self.report({"ERROR"}, f"'{name}' is not a symlink or junction")
+            return {"CANCELLED"}
+
+        # Disable if currently enabled
+        if name in context.preferences.addons:
+            try:
+                bpy.ops.preferences.addon_disable(module=name)
+                print(f"[devkit] Disabled '{name}'")
+            except Exception as e:
+                self.report({"WARNING"}, f"Error disabling: {e}")
+
+        # Remove the link
+        try:
+            if platform.system() == "Windows":
+                if os.path.islink(link_path):
+                    os.unlink(link_path)
+                else:
+                    os.rmdir(link_path)
+            else:
+                os.unlink(link_path)
+            print(f"[devkit] Unlinked: {link_path}")
+            self.report({"INFO"}, f"Unlinked '{name}'")
+        except Exception as e:
+            self.report({"ERROR"}, f"Failed to unlink: {e}")
+            return {"CANCELLED"}
+
+        # Clear reload target if it was pointing at this addon
+        addon_prefs = context.preferences.addons.get(ADDON_PACKAGE)
+        if addon_prefs and addon_prefs.preferences.reload_target_manual == name:
+            addon_prefs.preferences.reload_target_manual = ""
+
+        return {"FINISHED"}
+
+    def draw(self, context):
+        layout = self.layout
+        layout.prop(self, "target")
+
+
+def _get_linked_addon_items(context):
+    import os
+    items = [("", "— Select Addon —", "Choose a linked addon to unlink")]
+    addons_dir = bpy.utils.user_resource("SCRIPTS", path="addons")
+    for entry in sorted(os.listdir(addons_dir)):
+        entry_path = os.path.join(addons_dir, entry)
+        if os.path.islink(entry_path) or _is_junction(entry_path):
+            real_target = os.path.realpath(entry_path)
+            items.append((entry, f"{entry} → {real_target}", f"Unlink {entry}"))
+    return items
 
 
 def _is_junction(path):
@@ -262,4 +390,5 @@ classes = (
     INHYEONG_OT_reload_addon,
     INHYEONG_OT_reload_scripts,
     INHYEONG_OT_link_source,
+    INHYEONG_OT_unlink_source,
 )

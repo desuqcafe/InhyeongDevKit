@@ -121,29 +121,42 @@ class InhyeongDevKitPreferences(bpy.types.AddonPreferences):
         layout.separator()
         layout.label(text="Dev Setup", icon="LINKED")
         layout.operator("inhyeong_devkit.link_source", icon="LINK_BLEND")
+        layout.operator("inhyeong_devkit.unlink_source", icon="UNLINKED")
 
 
 # ─────────────────────────────────────────────
 # Window Menu
 # ─────────────────────────────────────────────
 
+class INHYEONG_MT_devkit_menu(bpy.types.Menu):
+    bl_idname = "INHYEONG_MT_devkit_menu"
+    bl_label = "Inhyeong DevKit"
+
+    def draw(self, context):
+        layout = self.layout
+        layout.operator("inhyeong_console.open", icon="CONSOLE")
+        layout.separator()
+
+        target = _get_reload_target(context)
+        if target:
+            op = layout.operator(
+                "inhyeong_devkit.reload_addon",
+                text=f"Reload: {target}",
+                icon="FILE_REFRESH",
+            )
+            op.module_name = target
+        else:
+            layout.operator("inhyeong_devkit.reload_addon", text="Reload Addon...", icon="FILE_REFRESH")
+
+        layout.operator("inhyeong_devkit.reload_scripts", icon="FILE_REFRESH")
+        layout.separator()
+        layout.operator("inhyeong_devkit.link_source", text="Link Addon Source...", icon="LINKED")
+        layout.operator("inhyeong_devkit.unlink_source", text="Unlink Addon Source...", icon="UNLINKED")
+
+
 def _window_menu_draw(self, context):
     self.layout.separator()
-    self.layout.operator("inhyeong_console.open", icon="CONSOLE")
-
-    target = _get_reload_target(context)
-    if target:
-        op = self.layout.operator(
-            "inhyeong_devkit.reload_addon",
-            text=f"Reload: {target}",
-            icon="FILE_REFRESH",
-        )
-        op.module_name = target
-    else:
-        self.layout.operator("inhyeong_devkit.reload_addon", text="Reload Addon...", icon="FILE_REFRESH")
-
-    self.layout.operator("inhyeong_devkit.reload_scripts", icon="FILE_REFRESH")
-    self.layout.operator("inhyeong_devkit.link_source", text="Link Addon Source...", icon="LINKED")
+    self.layout.menu("INHYEONG_MT_devkit_menu", icon="TOOL_SETTINGS")
 
 
 # ─────────────────────────────────────────────
@@ -214,6 +227,7 @@ def register():
     )
 
     # Menu, handlers, keymaps
+    bpy.utils.register_class(INHYEONG_MT_devkit_menu)
     bpy.types.TOPBAR_MT_window.append(_window_menu_draw)
     bpy.app.handlers.load_post.append(_on_load_post)
     _register_keymaps()
@@ -230,6 +244,7 @@ def unregister():
         bpy.app.handlers.load_post.remove(_on_load_post)
 
     bpy.types.TOPBAR_MT_window.remove(_window_menu_draw)
+    bpy.utils.unregister_class(INHYEONG_MT_devkit_menu)
 
     del bpy.types.WindowManager.inhyeong_console
 
